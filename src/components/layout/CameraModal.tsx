@@ -16,29 +16,44 @@ export const CameraModal = ({ isOpen, onClose, onCapture }: CameraModalProps) =>
   const [error, setError] = useState<string>('');
 
   useEffect(() => {
-    if (isOpen) {
-      startCamera();
-    } else {
-      stopCamera();
-    }
-    return () => stopCamera();
-  }, [isOpen]);
-
-  const startCamera = async () => {
-    try {
-      const mediaStream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'user', width: 640, height: 480 },
-        audio: false
-      });
-      setStream(mediaStream);
-      if (videoRef.current) {
-        videoRef.current.srcObject = mediaStream;
+    if (!isOpen) return;
+    
+    const initCamera = async () => {
+      try {
+        setError(null);
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { 
+            facingMode: 'environment',
+            width: { ideal: 640 },
+            height: { ideal: 480 }
+          },
+          audio: false
+        });
+        
+        if (videoRef.current) {
+          videoRef.current.srcObject = stream;
+          setStream(stream);
+        }
+      } catch (err: any) {
+        console.error('Camera error:', err);
+        if (err.name === 'NotAllowedError') {
+          setError('请允许相机权限以便拍照打卡');
+        } else if (err.name === 'NotFoundError') {
+          setError('未找到相机设备');
+        } else {
+          setError('无法访问相机: ' + err.message);
+        }
       }
-      setError('');
-    } catch (err) {
-      setError('无法访问相机，请检查权限设置');
-    }
-  };
+    };
+    
+    initCamera();
+    
+    return () => {
+      if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [isOpen]);
 
   const stopCamera = () => {
     if (stream) {
@@ -47,56 +62,37 @@ export const CameraModal = ({ isOpen, onClose, onCapture }: CameraModalProps) =>
     }
   };
 
-  const compressImage = (dataUrl: string, quality: number = 0.3): string => {
-    const img = new Image();
-    img.src = dataUrl;
-    
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    
-    const maxWidth = 320;
-    const maxHeight = 240;
-    let width = img.width;
-    let height = img.height;
-    
-    if (width > height) {
-      if (width > maxWidth) {
-        height *= maxWidth / width;
-        width = maxWidth;
-      }
-    } else {
-      if (height > maxHeight) {
-        width *= maxHeight / height;
-        height = maxHeight;
-      }
-    }
-    
-    canvas.width = width;
-    canvas.height = height;
-    
-    if (ctx) {
-      ctx.drawImage(img, 0, 0, width, height);
-    }
-    
-    return canvas.toDataURL('image/jpeg', quality);
-  };
-
   const handleCapture = () => {
     if (videoRef.current && canvasRef.current) {
       const canvas = canvasRef.current;
       const video = videoRef.current;
       
-      canvas.width = video.videoWidth;
-      canvas.height = video.videoHeight;
+      const maxWidth = 320;
+      const maxHeight = 240;
+      let width = video.videoWidth;
+      let height = video.videoHeight;
+      
+      if (width > height) {
+        if (width > maxWidth) {
+          height *= maxWidth / width;
+          width = maxWidth;
+        }
+      } else {
+        if (height > maxHeight) {
+          width *= maxHeight / height;
+          height = maxHeight;
+        }
+      }
+      
+      canvas.width = width;
+      canvas.height = height;
       
       const ctx = canvas.getContext('2d');
       if (ctx) {
-        ctx.drawImage(video, 0, 0);
+        ctx.drawImage(video, 0, 0, width, height);
         
-        const fullSizeDataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        const compressedData = compressImage(fullSizeDataUrl, 0.3);
-        
-        onCapture(compressedData);
+        const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.5);
+        onCapture(compressedDataUrl);
         stopCamera();
         onClose();
       }

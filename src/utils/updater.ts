@@ -1,28 +1,11 @@
-// 使用类型断言来避免 TypeScript 错误，这样可以在没有实际安装包的情况下编译
-declare let CapacitorUpdater: any;
-declare let App: any;
-
-// 安全地获取 Capacitor 插件
-function getCapacitorUpdater() {
-  try {
-    return (window as any).Capacitor?.Plugins?.CapacitorUpdater;
-  } catch (e) {
-    return null;
-  }
-}
-
-function getAppPlugin() {
-  try {
-    return (window as any).Capacitor?.Plugins?.App;
-  } catch (e) {
-    return null;
-  }
-}
+import { CapacitorUpdater } from '@capgo/capacitor-updater';
+import { App } from '@capacitor/app';
 
 // ⚠️ 重要：在这里填入你的 GitHub 仓库信息！
 // 例如：'zhangsan/attendance-app'
-const GITHUB_REPO = '你的用户名/仓库名';
+const GITHUB_REPO = '你的用户名/仓库名'; // 保持占位符，等用户配置后再改
 const CURRENT_VERSION = '1.0.0';
+const IS_CAPACITOR = typeof window !== 'undefined' && (window as any).Capacitor?.isPluginAvailable('CapacitorUpdater');
 
 export interface UpdateInfo {
   version: string;
@@ -35,13 +18,17 @@ export interface UpdateInfo {
  */
 export async function checkForUpdates(): Promise<UpdateInfo | null> {
   try {
+    // 如果不是在 Capacitor 环境中，或者 GitHub Repo 还是占位符，直接跳过
+    if (!IS_CAPACITOR || GITHUB_REPO === '你的用户名/仓库名') {
+      return null;
+    }
+
     // 从 GitHub Releases 获取最新版本
     const response = await fetch(
       `https://api.github.com/repos/${GITHUB_REPO}/releases/latest`
     );
 
     if (!response.ok) {
-      console.error('无法检查更新:', response.statusText);
       return null;
     }
 
@@ -66,7 +53,7 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
 
     return null;
   } catch (error) {
-    console.error('检查更新失败:', error);
+    // 静默处理更新检查错误，不影响主应用
     return null;
   }
 }
@@ -75,17 +62,15 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
  * 下载并应用更新
  */
 export async function downloadAndApplyUpdate(update: UpdateInfo): Promise<void> {
-  const updater = getCapacitorUpdater();
-  if (!updater) {
-    console.warn('CapacitorUpdater 不可用，无法更新');
-    return;
-  }
-
   try {
+    if (!IS_CAPACITOR) {
+      throw new Error('只能在 Capacitor 应用环境中使用更新功能');
+    }
+
     console.log('开始下载更新:', update.version);
 
     // 下载更新
-    const version = await updater.download({
+    const version = await CapacitorUpdater.download({
       version: update.version,
       url: update.url
     });
@@ -93,7 +78,7 @@ export async function downloadAndApplyUpdate(update: UpdateInfo): Promise<void> 
     console.log('下载完成，应用更新...');
 
     // 应用更新
-    await updater.set(version);
+    await CapacitorUpdater.set(version);
 
     console.log('更新应用成功！');
   } catch (error) {
@@ -127,16 +112,17 @@ function isNewerVersion(latest: string, current: string): boolean {
  * 初始化更新监听
  */
 export function initUpdateListener() {
-  const updater = getCapacitorUpdater();
-  if (updater) {
-    // 应用启动时通知 Capgo
-    updater.notifyAppReady();
-  }
+  try {
+    // 只在 Capacitor 环境中启用更新功能
+    if (!IS_CAPACITOR) {
+      return;
+    }
 
-  const app = getAppPlugin();
-  if (app) {
+    // 应用启动时通知 Capgo
+    CapacitorUpdater.notifyAppReady();
+
     // 监听应用状态变化
-    app.addListener('appStateChange', async ({ isActive }: { isActive: boolean }) => {
+    App.addListener('appStateChange', async ({ isActive }) => {
       if (isActive) {
         // 应用进入前台时检查更新
         const update = await checkForUpdates();
@@ -147,5 +133,7 @@ export function initUpdateListener() {
         }
       }
     });
+  } catch (error) {
+    // 静默处理初始化错误
   }
 }

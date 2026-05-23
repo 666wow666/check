@@ -11,7 +11,22 @@ const saveLocalRecords = (userId: string, records: AttendanceRecord[]) => {
 
 const loadLocalRecords = (userId: string): AttendanceRecord[] => {
   const data = localStorage.getItem(getLocalRecordsKey(userId));
-  return data ? JSON.parse(data) : [];
+  if (!data) return [];
+  
+  // 转换旧格式的数据（下划线命名到驼峰命名）
+  const parsedData = JSON.parse(data);
+  return parsedData.map((record: any) => {
+    return {
+      id: record.id,
+      userId: record.userId || record.user_id,
+      date: record.date,
+      checkIn: record.checkIn || record.check_in,
+      checkOut: record.checkOut || record.check_out,
+      checkInPhoto: record.checkInPhoto || record.check_in_photo,
+      checkOutPhoto: record.checkOutPhoto || record.check_out_photo,
+      status: record.status,
+    };
+  });
 };
 
 interface AttendanceState {
@@ -154,10 +169,20 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
         if (isLocalUser) {
           updatedRecords = records.map(r => {
             if (r.id === existingRecord.id) {
-              return {
-                ...r,
-                ...updateData,
-              };
+              const updatedRecord = { ...r };
+              if (isBefore12) {
+                updatedRecord.checkIn = time;
+                updatedRecord.checkInPhoto = photoData;
+              } else {
+                updatedRecord.checkOut = time;
+                updatedRecord.checkOutPhoto = photoData;
+              }
+              if (late) {
+                updatedRecord.status = 'late';
+              } else if (r.status !== 'leave' && r.status !== 'vacation') {
+                updatedRecord.status = 'checked';
+              }
+              return updatedRecord;
             }
             return r;
           });
@@ -169,10 +194,20 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
 
           updatedRecords = records.map(r => {
             if (r.id === existingRecord.id) {
-              return {
-                ...r,
-                ...updateData,
-              };
+              const updatedRecord = { ...r };
+              if (isBefore12) {
+                updatedRecord.checkIn = time;
+                updatedRecord.checkInPhoto = photoData;
+              } else {
+                updatedRecord.checkOut = time;
+                updatedRecord.checkOutPhoto = photoData;
+              }
+              if (late) {
+                updatedRecord.status = 'late';
+              } else if (r.status !== 'leave' && r.status !== 'vacation') {
+                updatedRecord.status = 'checked';
+              }
+              return updatedRecord;
             }
             return r;
           });

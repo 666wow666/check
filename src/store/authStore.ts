@@ -122,80 +122,104 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   register: async (name: string) => {
     const deviceId = generateDeviceId();
-    const userData = {
-      device_id: deviceId,
+    
+    // 立即创建本地用户，确保 UI 不会卡住
+    const localUser: User = {
+      id: 'local_' + Date.now(),
       name: name.trim(),
       nickname: name.trim(),
-      morning_deadline: '06:30',
-      afternoon_deadline: '16:55',
+      deviceId: deviceId,
+      morningDeadline: '06:30',
+      afternoonDeadline: '16:55',
     };
+    
+    // 先设置本地用户，让用户可以立即使用
+    set({ user: localUser, isLoading: false });
+    localStorage.setItem('user', JSON.stringify(localUser));
+    
+    // 尝试同步到云端（后台进行，不阻塞 UI）
+    setTimeout(async () => {
+      try {
+        const userData = {
+          device_id: deviceId,
+          name: name.trim(),
+          nickname: name.trim(),
+          morning_deadline: '06:30',
+          afternoon_deadline: '16:55',
+        };
 
-    try {
-      const { data: existingUser } = await supabase
-        .from('users')
-        .select('*')
-        .eq('device_id', deviceId)
-        .single();
+        // 检查是否已有该设备用户
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
 
-      let user: User;
-
-      if (existingUser) {
-        const { data: updatedUser } = await supabase
+        const { data: existingUser } = await supabase
           .from('users')
-          .update({ 
-            name: name.trim(), 
-            nickname: name.trim(),
-            updated_at: new Date().toISOString()
-          })
+          .select('*')
           .eq('device_id', deviceId)
-          .select()
           .single();
 
-        user = {
-          id: updatedUser?.id || existingUser.id,
-          name: updatedUser?.name || existingUser.name,
-          nickname: updatedUser?.nickname || existingUser.nickname,
-          deviceId: updatedUser?.device_id || existingUser.device_id,
-          morningDeadline: updatedUser?.morning_deadline || existingUser.morning_deadline || '06:30',
-          afternoonDeadline: updatedUser?.afternoon_deadline || existingUser.afternoon_deadline || '16:55',
-        };
-      } else {
-        const { data: newUser } = await supabase
-          .from('users')
-          .insert(userData)
-          .select()
-          .single();
+        clearTimeout(timeoutId);
 
-        user = {
-          id: newUser.id,
-          name: newUser.name,
-          nickname: newUser.nickname,
-          deviceId: newUser.device_id,
-          morningDeadline: newUser.morning_deadline,
-          afternoonDeadline: newUser.afternoon_deadline,
-        };
+        let cloudUser: User;
+
+        if (existingUser) {
+          // 更新现有用户
+          const { data: updatedUser } = await supabase
+            .from('users')
+            .update({ 
+              name: name.trim(), 
+              nickname: name.trim(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('device_id', deviceId)
+            .select()
+            .single();
+
+          cloudUser = {
+            id: updatedUser?.id || existingUser.id,
+            name: updatedUser?.name || existingUser.name,
+            nickname: updatedUser?.nickname || existingUser.nickname,
+            deviceId: updatedUser?.device_id || existingUser.device_id,
+            morningDeadline: updatedUser?.morning_deadline || existingUser.morning_deadline || '06:30',
+            afternoonDeadline: updatedUser?.afternoon_deadline || existingUser.afternoon_deadline || '16:55',
+          };
+        } else {
+          // 创建新用户
+          const { data: newUser } = await supabase
+            .from('users')
+            .insert(userData)
+            .select()
+            .single();
+
+          if (newUser) {
+            cloudUser = {
+              id: newUser.id,
+              name: newUser.name,
+              nickname: newUser.nickname,
+              deviceId: newUser.device_id,
+              morningDeadline: newUser.morning_deadline,
+              afternoonDeadline: newUser.afternoon_deadline,
+            };
+            
+            // 成功同步，更新本地存储
+            set({ user: cloudUser });
+            localStorage.setItem('user', JSON.stringify(cloudUser));
+            
+            // 初始化配对
+            await get().initializePair();
+            return;
+          }
+        }
+
+        // 如果云端创建成功但用户对象创建失败，使用本地用户继续
+        console.log('Cloud sync completed, using local user');
+      } catch (error) {
+        console.error('Cloud sync error (continuing with local user):', error);
+        // 继续使用本地用户，不阻塞用户操作
       }
+    }, 0);
 
-      set({ user, isLoading: false });
-      localStorage.setItem('user', JSON.stringify(user));
-      
-      await get().initializePair();
-      
-      return user;
-    } catch (error) {
-      console.error('Register error:', error);
-      const user: User = {
-        id: 'local_' + Date.now(),
-        name: name.trim(),
-        nickname: name.trim(),
-        deviceId: deviceId,
-        morningDeadline: '06:30',
-        afternoonDeadline: '16:55',
-      };
-      set({ user, isLoading: false });
-      localStorage.setItem('user', JSON.stringify(user));
-      return user;
-    }
+    return localUser;
   },
 
   updateNickname: async (nickname: string) => {
