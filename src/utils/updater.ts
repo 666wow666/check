@@ -1,5 +1,23 @@
-import { CapacitorUpdater } from '@capgo/capacitor-updater';
-import { App } from '@capacitor/app';
+// 使用类型断言来避免 TypeScript 错误，这样可以在没有实际安装包的情况下编译
+declare let CapacitorUpdater: any;
+declare let App: any;
+
+// 安全地获取 Capacitor 插件
+function getCapacitorUpdater() {
+  try {
+    return (window as any).Capacitor?.Plugins?.CapacitorUpdater;
+  } catch (e) {
+    return null;
+  }
+}
+
+function getAppPlugin() {
+  try {
+    return (window as any).Capacitor?.Plugins?.App;
+  } catch (e) {
+    return null;
+  }
+}
 
 // ⚠️ 重要：在这里填入你的 GitHub 仓库信息！
 // 例如：'zhangsan/attendance-app'
@@ -57,11 +75,17 @@ export async function checkForUpdates(): Promise<UpdateInfo | null> {
  * 下载并应用更新
  */
 export async function downloadAndApplyUpdate(update: UpdateInfo): Promise<void> {
+  const updater = getCapacitorUpdater();
+  if (!updater) {
+    console.warn('CapacitorUpdater 不可用，无法更新');
+    return;
+  }
+
   try {
     console.log('开始下载更新:', update.version);
 
     // 下载更新
-    const version = await CapacitorUpdater.download({
+    const version = await updater.download({
       version: update.version,
       url: update.url
     });
@@ -69,7 +93,7 @@ export async function downloadAndApplyUpdate(update: UpdateInfo): Promise<void> 
     console.log('下载完成，应用更新...');
 
     // 应用更新
-    await CapacitorUpdater.set(version);
+    await updater.set(version);
 
     console.log('更新应用成功！');
   } catch (error) {
@@ -103,19 +127,25 @@ function isNewerVersion(latest: string, current: string): boolean {
  * 初始化更新监听
  */
 export function initUpdateListener() {
-  // 应用启动时通知 Capgo
-  CapacitorUpdater.notifyAppReady();
+  const updater = getCapacitorUpdater();
+  if (updater) {
+    // 应用启动时通知 Capgo
+    updater.notifyAppReady();
+  }
 
-  // 监听应用状态变化
-  App.addListener('appStateChange', async ({ isActive }) => {
-    if (isActive) {
-      // 应用进入前台时检查更新
-      const update = await checkForUpdates();
-      if (update) {
-        // 这里可以显示更新提示给用户
-        console.log('发现新版本:', update.version);
-        // 可以添加 UI 让用户选择是否更新
+  const app = getAppPlugin();
+  if (app) {
+    // 监听应用状态变化
+    app.addListener('appStateChange', async ({ isActive }: { isActive: boolean }) => {
+      if (isActive) {
+        // 应用进入前台时检查更新
+        const update = await checkForUpdates();
+        if (update) {
+          // 这里可以显示更新提示给用户
+          console.log('发现新版本:', update.version);
+          // 可以添加 UI 让用户选择是否更新
+        }
       }
-    }
-  });
+    });
+  }
 }
