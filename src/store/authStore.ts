@@ -160,7 +160,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
         clearTimeout(timeoutId);
 
-        let cloudUser: User;
+        let cloudUser: User | undefined;
 
         if (existingUser) {
           // 更新现有用户
@@ -200,19 +200,21 @@ export const useAuthStore = create<AuthState>((set, get) => ({
               morningDeadline: newUser.morning_deadline,
               afternoonDeadline: newUser.afternoon_deadline,
             };
-            
-            // 成功同步，更新本地存储
-            set({ user: cloudUser });
-            localStorage.setItem('user', JSON.stringify(cloudUser));
-            
-            // 初始化配对
-            await get().initializePair();
-            return;
           }
         }
 
+        // 如果有云端用户，更新本地存储（避免循环更新）
+        if (cloudUser) {
+          localStorage.setItem('user', JSON.stringify(cloudUser));
+          const { user: currentUser } = get();
+          if (currentUser?.id !== cloudUser.id) {
+            set({ user: cloudUser });
+          }
+          await get().initializePair();
+        }
+
         // 如果云端创建成功但用户对象创建失败，使用本地用户继续
-        console.log('Cloud sync completed, using local user');
+        console.log('Cloud sync completed');
       } catch (error) {
         console.error('Cloud sync error (continuing with local user):', error);
         // 继续使用本地用户，不阻塞用户操作

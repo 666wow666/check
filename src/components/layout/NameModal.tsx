@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Clock } from 'lucide-react';
 import { Card } from '../common/Card';
 import { Button } from '../common/Button';
@@ -11,11 +11,23 @@ interface NameModalProps {
 export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // 只在第一次打开时重置状态，不每次都清空
+  useEffect(() => {
+    if (isOpen && !name && !error && !isSubmitting) {
+      setError('');
+      setIsSubmitting(false);
+    }
+  }, [isOpen]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    if (isSubmitting) return;
+    
     setError('');
 
     if (!name.trim()) {
@@ -23,8 +35,15 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
       return;
     }
 
-    onSubmit(name.trim());
-    setName('');
+    setIsSubmitting(true);
+    
+    try {
+      await onSubmit(name.trim());
+    } catch (error) {
+      console.error('提交名字失败:', error);
+      setError('提交失败，请重试');
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -48,7 +67,7 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
               value={name}
               onChange={(e) => setName(e.target.value)}
               placeholder="请输入您的名字"
-              autoFocus
+              autoComplete="off"
               className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-slate-400 focus:outline-none transition-colors text-slate-900"
             />
           </div>
@@ -63,8 +82,9 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
             type="submit"
             className="w-full mt-2"
             size="lg"
+            disabled={isSubmitting}
           >
-            开始使用
+            {isSubmitting ? '加载中...' : '开始使用'}
           </Button>
         </form>
       </Card>

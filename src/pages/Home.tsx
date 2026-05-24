@@ -38,12 +38,16 @@ export const Home = () => {
   const [nickname, setNickname] = useState(user?.nickname || '');
   const [morningDeadline, setMorningDeadline] = useState(user?.morningDeadline || '06:30');
   const [afternoonDeadline, setAfternoonDeadline] = useState(user?.afternoonDeadline || '16:55');
+  // 添加一个标志，避免反复触发
+  const [hasShownNameModal, setHasShownNameModal] = useState(false);
 
+  // 只在第一次检测到 user 为 null 且还没显示过 nameModal 时才显示
   useEffect(() => {
-    if (!user) {
+    if (!user && !hasShownNameModal) {
       setShowNameModal(true);
+      setHasShownNameModal(true);
     }
-  }, [user]);
+  }, [user, hasShownNameModal]);
 
   useEffect(() => {
     if (user) {
@@ -78,8 +82,16 @@ export const Home = () => {
   };
 
   const handleNameSubmit = async (name: string) => {
-    await register(name);
-    setShowNameModal(false);
+    try {
+      // 先立即关闭模态框，避免状态更新导致重新打开
+      setShowNameModal(false);
+      // 然后执行注册
+      await register(name);
+    } catch (error) {
+      console.error('注册失败:', error);
+      // 如果注册失败，重新显示模态框
+      setShowNameModal(true);
+    }
   };
 
   const handlePairClose = () => {
