@@ -21,16 +21,9 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": false,
     "noUncheckedSideEffectImports": false,
-    "forceConsistentCasingInFileNames": false,
-    "baseUrl": "./",
-    "paths": {
-      "@/*": [
-        "./src/*"
-      ]
-    }
+    "forceConsistentCasingInFileNames": false
   },
   "include": [
-    "src",
-    "api"
+    "src"
   ]
 }
