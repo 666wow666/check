@@ -1,12 +1,13 @@
 import { useState, useEffect } from 'react';
-import { ChevronLeft, ChevronRight, Users, X, Calendar } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Calendar, FileText, Users, X } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { Card } from '../components/common/Card';
 import { supabase } from '../config/supabase';
 import { AttendanceRecord } from '../types';
+import { PhotoViewer } from '../components/layout/PhotoViewer';
 
-export const Records = () => {
+export default function Records() {
   const { user, loadAllUsers, currentPair } = useAuthStore();
   const { records, loadRecords } = useAttendanceStore();
   const [currentMonth, setCurrentMonth] = useState(new Date());
@@ -16,6 +17,7 @@ export const Records = () => {
   const [partnerRecords, setPartnerRecords] = useState<AttendanceRecord[]>([]);
   const [partner, setPartner] = useState<any>(null);
   const [expandedDate, setExpandedDate] = useState<string | null>(null);
+  const [selectedPhoto, setSelectedPhoto] = useState<{src: string; alt: string} | null>(null);
 
   useEffect(() => {
     if (user) {
@@ -110,6 +112,7 @@ export const Records = () => {
               checkInPhoto: record.checkInPhoto || record.check_in_photo,
               checkOutPhoto: record.checkOutPhoto || record.check_out_photo,
               status: record.status,
+              leavePeriod: record.leavePeriod || record.leave_period || 'none',
             };
           });
           setPartnerRecords(mapped);
@@ -130,6 +133,7 @@ export const Records = () => {
             checkInPhoto: r.check_in_photo,
             checkOutPhoto: r.check_out_photo,
             status: r.status,
+            leavePeriod: r.leave_period || 'none',
           }));
           setPartnerRecords(mapped);
         }
@@ -185,9 +189,15 @@ export const Records = () => {
     checkOut: string | null,
     status: string,
     isAm: boolean,
+    leavePeriod: string = 'none',
     partnerRecord?: AttendanceRecord | null
   ) => {
-    const myChecked = status === 'checked' || status === 'late' || status === 'leave' || status === 'vacation';
+    // 如果是半天请假，检查该时段是否请假
+    const isLeaveForPeriod = (status === 'leave' && leavePeriod !== 'none') ?
+      (isAm ? (leavePeriod === 'morning' || leavePeriod === 'full') : (leavePeriod === 'afternoon' || leavePeriod === 'full')) :
+      (status === 'leave' || status === 'vacation');
+    
+    const myChecked = status === 'checked' || status === 'late' || isLeaveForPeriod;
     const partnerChecked = partnerRecord && (
       partnerRecord.status === 'checked' || 
       partnerRecord.status === 'late' || 
@@ -195,14 +205,20 @@ export const Records = () => {
       partnerRecord.status === 'vacation'
     );
 
-    const myAmChecked = checkIn !== null || status === 'leave' || status === 'vacation';
-    const partnerAmChecked = partnerRecord?.checkIn !== null || partnerRecord?.status === 'leave' || partnerRecord?.status === 'vacation';
-
-    const myPmChecked = checkOut !== null || status === 'leave' || status === 'vacation';
-    const partnerPmChecked = partnerRecord?.checkOut !== null || partnerRecord?.status === 'leave' || partnerRecord?.status === 'vacation';
+    // 检查我的该时段是否已打卡或请假
+    const myAmChecked = checkIn !== null || (status === 'leave' && (leavePeriod === 'morning' || leavePeriod === 'full')) || status === 'vacation';
+    const myPmChecked = checkOut !== null || (status === 'leave' && (leavePeriod === 'afternoon' || leavePeriod === 'full')) || status === 'vacation';
+    
+    // 检查伙伴的该时段是否已打卡或请假
+    const partnerAmChecked = partnerRecord?.checkIn !== null || 
+      (partnerRecord?.status === 'leave' && (partnerRecord.leavePeriod === 'morning' || partnerRecord.leavePeriod === 'full')) ||
+      partnerRecord?.status === 'vacation';
+    const partnerPmChecked = partnerRecord?.checkOut !== null || 
+      (partnerRecord?.status === 'leave' && (partnerRecord.leavePeriod === 'afternoon' || partnerRecord.leavePeriod === 'full')) ||
+      partnerRecord?.status === 'vacation';
 
     if (isAm) {
-      if (status === 'leave' || status === 'vacation') {
+      if (isLeaveForPeriod) {
         return { color: 'bg-sky-100', text: '假' };
       }
       
@@ -216,7 +232,7 @@ export const Records = () => {
         return { color: 'bg-rose-100', text: '✗' };
       }
     } else {
-      if (status === 'leave' || status === 'vacation') {
+      if (isLeaveForPeriod) {
         return { color: 'bg-sky-100', text: '假' };
       }
       
@@ -246,14 +262,24 @@ export const Records = () => {
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: string, leavePeriod?: string) => {
+    if (status === 'leave') {
+      switch (leavePeriod) {
+        case 'morning':
+          return '上午请假';
+        case 'afternoon':
+          return '下午请假';
+        case 'full':
+          return '全天请假';
+        default:
+          return '请假';
+      }
+    }
     switch (status) {
       case 'checked':
         return '已打卡';
       case 'late':
         return '迟到';
-      case 'leave':
-        return '请假';
       case 'vacation':
         return '休假';
       default:
@@ -289,6 +315,12 @@ export const Records = () => {
     const record = getRecord(date);
     const partnerRecord = getPartnerRecord(date);
     
+    // 检查该时段是否请假
+    const isAmLeave = record?.status === 'leave' && (record.leavePeriod === 'morning' || record.leavePeriod === 'full');
+    const isPmLeave = record?.status === 'leave' && (record.leavePeriod === 'afternoon' || record.leavePeriod === 'full');
+    const partnerIsAmLeave = partnerRecord?.status === 'leave' && (partnerRecord.leavePeriod === 'morning' || partnerRecord.leavePeriod === 'full');
+    const partnerIsPmLeave = partnerRecord?.status === 'leave' && (partnerRecord.leavePeriod === 'afternoon' || partnerRecord.leavePeriod === 'full');
+    
     return (
       <Card className="p-5 mb-6">
         <div className="flex items-center justify-between mb-4">
@@ -306,19 +338,26 @@ export const Records = () => {
                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
                   <div>
                     <p className="text-sm font-medium text-slate-800">上午打卡</p>
-                    <p className="text-xs text-slate-500">{record.checkIn || '未打卡'}</p>
+                    <p className="text-xs text-slate-500">
+                      {isAmLeave ? '请假' : (record.checkIn || '未打卡')}
+                    </p>
                   </div>
-                  {record.checkInPhoto && record.checkInPhoto.startsWith('data:image') ? (
+                  {record.checkInPhoto && record.checkInPhoto.startsWith('data:image') && !isAmLeave ? (
                     <img
                       src={record.checkInPhoto}
                       alt="上午打卡照片"
-                      className="w-16 h-16 rounded-lg object-cover"
+                      className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => setSelectedPhoto({ src: record.checkInPhoto!, alt: '上午打卡照片' })}
                       onError={(e) => {
                         console.error('图片加载失败:', e);
                         e.currentTarget.style.display = 'none';
                       }}
                     />
-                  ) : (
+                  ) : isAmLeave ? (
+                      <div className="w-16 h-16 rounded-lg bg-sky-200 flex items-center justify-center">
+                      <span className="text-xs text-sky-600">请假</span>
+                    </div>
+                    ) : (
                     <div className="w-16 h-16 rounded-lg bg-slate-200 flex items-center justify-center">
                       <span className="text-xs text-slate-500">无照片</span>
                     </div>
@@ -328,19 +367,26 @@ export const Records = () => {
                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
                   <div>
                     <p className="text-sm font-medium text-slate-800">下午打卡</p>
-                    <p className="text-xs text-slate-500">{record.checkOut || '未打卡'}</p>
+                    <p className="text-xs text-slate-500">
+                      {isPmLeave ? '请假' : (record.checkOut || '未打卡')}
+                    </p>
                   </div>
-                  {record.checkOutPhoto && record.checkOutPhoto.startsWith('data:image') ? (
+                  {record.checkOutPhoto && record.checkOutPhoto.startsWith('data:image') && !isPmLeave ? (
                     <img
                       src={record.checkOutPhoto}
                       alt="下午打卡照片"
-                      className="w-16 h-16 rounded-lg object-cover"
+                      className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => setSelectedPhoto({ src: record.checkOutPhoto!, alt: '下午打卡照片' })}
                       onError={(e) => {
                         console.error('图片加载失败:', e);
                         e.currentTarget.style.display = 'none';
                       }}
                     />
-                  ) : (
+                  ) : isPmLeave ? (
+                      <div className="w-16 h-16 rounded-lg bg-sky-200 flex items-center justify-center">
+                      <span className="text-xs text-sky-600">请假</span>
+                    </div>
+                    ) : (
                     <div className="w-16 h-16 rounded-lg bg-slate-200 flex items-center justify-center">
                       <span className="text-xs text-slate-500">无照片</span>
                     </div>
@@ -349,7 +395,7 @@ export const Records = () => {
                 
                 <div className="flex items-center gap-2">
                   <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColorClass(record.status)}`}>
-                    {getStatusText(record.status)}
+                    {getStatusText(record.status, record.leavePeriod)}
                   </span>
                 </div>
               </div>
@@ -365,18 +411,25 @@ export const Records = () => {
                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
                   <div>
                     <p className="text-sm font-medium text-slate-800">上午打卡</p>
-                    <p className="text-xs text-slate-500">{partnerRecord.checkIn || '未打卡'}</p>
+                    <p className="text-xs text-slate-500">
+                      {partnerIsAmLeave ? '请假' : (partnerRecord.checkIn || '未打卡')}
+                    </p>
                   </div>
-                  {partnerRecord.checkInPhoto && partnerRecord.checkInPhoto.startsWith('data:image') ? (
+                  {partnerRecord.checkInPhoto && partnerRecord.checkInPhoto.startsWith('data:image') && !partnerIsAmLeave ? (
                     <img
                       src={partnerRecord.checkInPhoto}
                       alt="上午打卡照片"
-                      className="w-16 h-16 rounded-lg object-cover"
+                      className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => setSelectedPhoto({ src: partnerRecord.checkInPhoto!, alt: '上午打卡照片' })}
                       onError={(e) => {
                         console.error('图片加载失败:', e);
                         e.currentTarget.style.display = 'none';
                       }}
                     />
+                  ) : partnerIsAmLeave ? (
+                    <div className="w-16 h-16 rounded-lg bg-sky-200 flex items-center justify-center">
+                    <span className="text-xs text-sky-600">请假</span>
+                  </div>
                   ) : (
                     <div className="w-16 h-16 rounded-lg bg-slate-200 flex items-center justify-center">
                       <span className="text-xs text-slate-500">无照片</span>
@@ -387,18 +440,25 @@ export const Records = () => {
                 <div className="flex items-center justify-between p-3 bg-slate-50 rounded-xl">
                   <div>
                     <p className="text-sm font-medium text-slate-800">下午打卡</p>
-                    <p className="text-xs text-slate-500">{partnerRecord.checkOut || '未打卡'}</p>
+                    <p className="text-xs text-slate-500">
+                      {partnerIsPmLeave ? '请假' : (partnerRecord.checkOut || '未打卡')}
+                    </p>
                   </div>
-                  {partnerRecord.checkOutPhoto && partnerRecord.checkOutPhoto.startsWith('data:image') ? (
+                  {partnerRecord.checkOutPhoto && partnerRecord.checkOutPhoto.startsWith('data:image') && !partnerIsPmLeave ? (
                     <img
                       src={partnerRecord.checkOutPhoto}
                       alt="下午打卡照片"
-                      className="w-16 h-16 rounded-lg object-cover"
+                      className="w-16 h-16 rounded-lg object-cover cursor-pointer hover:opacity-80 transition-opacity"
+                      onClick={() => setSelectedPhoto({ src: partnerRecord.checkOutPhoto!, alt: '下午打卡照片' })}
                       onError={(e) => {
                         console.error('图片加载失败:', e);
                         e.currentTarget.style.display = 'none';
                       }}
                     />
+                  ) : partnerIsPmLeave ? (
+                    <div className="w-16 h-16 rounded-lg bg-sky-200 flex items-center justify-center">
+                    <span className="text-xs text-sky-600">请假</span>
+                  </div>
                   ) : (
                     <div className="w-16 h-16 rounded-lg bg-slate-200 flex items-center justify-center">
                       <span className="text-xs text-slate-500">无照片</span>
@@ -408,7 +468,7 @@ export const Records = () => {
                 
                 <div className="flex items-center gap-2">
                   <span className={`px-3 py-1 rounded-full text-xs font-medium ${getStatusColorClass(partnerRecord.status)}`}>
-                    {getStatusText(partnerRecord.status)}
+                    {getStatusText(partnerRecord.status, partnerRecord.leavePeriod)}
                   </span>
                 </div>
               </div>
@@ -469,8 +529,8 @@ export const Records = () => {
               const isToday = dateStr === new Date().toISOString().split('T')[0];
               const isExpanded = expandedDate === dateStr;
 
-              const amStatus = record ? getAmPmStatus(record.checkIn, record.checkOut, record.status, true, partnerRecord) : null;
-              const pmStatus = record ? getAmPmStatus(record.checkIn, record.checkOut, record.status, false, partnerRecord) : null;
+              const amStatus = record ? getAmPmStatus(record.checkIn, record.checkOut, record.status, true, record.leavePeriod, partnerRecord) : null;
+              const pmStatus = record ? getAmPmStatus(record.checkIn, record.checkOut, record.status, false, record.leavePeriod, partnerRecord) : null;
 
               const handleDateClick = () => {
                 if (day) {
@@ -622,6 +682,14 @@ export const Records = () => {
             </div>
           )}
         </Card>
+        
+        {selectedPhoto && (
+          <PhotoViewer
+            src={selectedPhoto.src}
+            alt={selectedPhoto.alt}
+            onClose={() => setSelectedPhoto(null)}
+          />
+        )}
       </div>
     </div>
   );

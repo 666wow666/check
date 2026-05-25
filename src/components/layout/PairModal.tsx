@@ -38,7 +38,7 @@ export const PairModal = ({ isOpen, onClose }: PairModalProps) => {
     if (isOpen && mode === 'create' && currentPair?.id) {
       try {
         channel = supabase
-          .channel('pair-waiting')
+          .channel(`pair-waiting-${currentPair.id}`)
           .on(
             'postgres_changes',
             {
@@ -48,15 +48,25 @@ export const PairModal = ({ isOpen, onClose }: PairModalProps) => {
               filter: `id=eq.${currentPair.id}`
             },
             async (payload: any) => {
-              if (payload.new.status === 'active') {
-                await loadCurrentPair();
-                onClose();
+              console.log('Received pair update:', payload);
+              if (payload.new?.status === 'active') {
+                try {
+                  await loadCurrentPair();
+                  onClose();
+                } catch (err) {
+                  console.error('Failed to reload pair:', err);
+                }
               }
             }
           )
-          .subscribe();
+          .subscribe((status: string) => {
+            console.log('Pair subscription status:', status);
+            if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+              console.error('Pair subscription failed, will retry...');
+            }
+          });
       } catch (error) {
-        console.error('Failed to subscribe:', error);
+        console.error('Failed to subscribe to pair changes:', error);
       }
     }
 

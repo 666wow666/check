@@ -383,7 +383,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         throw new Error('不能加入自己的配对');
       }
 
-      const { data: updatedPair } = await supabase
+      const { data: updatedPair, error: updateError } = await supabase
         .from('pairs')
         .update({
           user2_id: user.id,
@@ -393,6 +393,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         .eq('id', pair.id)
         .select()
         .single();
+
+      if (updateError || !updatedPair) {
+        throw new Error('加入配对失败，请重试');
+      }
 
       const newPair: Pair = {
         id: updatedPair.id,
@@ -404,7 +408,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       set({ currentPair: newPair });
       
-      await get().loadPartnerInfo();
+      // 加载配对用户信息，失败不影响主流程
+      try {
+        await get().loadPartnerInfo();
+      } catch (err) {
+        console.error('Load partner info failed:', err);
+      }
     } catch (error) {
       console.error('Join pair error:', error);
       throw error;

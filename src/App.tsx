@@ -3,8 +3,9 @@ import { useAuthStore } from './store/authStore';
 import { useEffect } from 'react';
 import { BottomNav } from './components/layout/BottomNav';
 import { Home } from './pages/Home';
-import { Records } from './pages/Records';
+import Records from './pages/Records';
 import { Billing } from './pages/Billing';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
 
 function App() {
   const { initialize, isLoading } = useAuthStore();
@@ -22,17 +23,19 @@ function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50">
-      <BrowserRouter>
-        <Routes>
-          <Route path="/" element={<Navigate to="/home" replace />} />
-          <Route path="/home" element={<Home />} />
-          <Route path="/records" element={<Records />} />
-          <Route path="/billing" element={<Billing />} />
-        </Routes>
-        <BottomNav />
-      </BrowserRouter>
-    </div>
+    <ErrorBoundary>
+      <div className="min-h-screen bg-slate-50">
+        <BrowserRouter>
+          <Routes>
+            <Route path="/" element={<Navigate to="/home" replace />} />
+            <Route path="/home" element={<Home />} />
+            <Route path="/records" element={<Records />} />
+            <Route path="/billing" element={<Billing />} />
+          </Routes>
+          <BottomNav />
+        </BrowserRouter>
+      </div>
+    </ErrorBoundary>
   );
 }
 

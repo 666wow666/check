@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Settings, Users, Link2 } from 'lucide-react';
+import { Settings, Users, Link2, Wifi, WifiOff } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { useAttendanceStore } from '../store/attendanceStore';
 import { BottomNav } from '../components/layout/BottomNav';
@@ -8,7 +8,7 @@ import { CameraModal } from '../components/layout/CameraModal';
 import { NameModal } from '../components/layout/NameModal';
 import { PairModal } from '../components/layout/PairModal';
 import { AttendanceRecord } from '../types';
-import { supabase } from '../config/supabase';
+import { checkSupabaseConnection, isSupabaseConnected, getConnectionStatus } from '../config/supabase';
 
 export const Home = () => {
   const { 
@@ -24,6 +24,7 @@ export const Home = () => {
     records, 
     loadRecords, 
     punch, 
+    applyLeave,
     loadPartnerRecord, 
     subscribeToAttendance, 
     unsubscribe,
@@ -35,11 +36,28 @@ export const Home = () => {
   const [showCamera, setShowCamera] = useState(false);
   const [showNameModal, setShowNameModal] = useState(false);
   const [showPairModal, setShowPairModal] = useState(false);
+  const [showLeaveModal, setShowLeaveModal] = useState(false);
   const [nickname, setNickname] = useState(user?.nickname || '');
   const [morningDeadline, setMorningDeadline] = useState(user?.morningDeadline || '06:30');
   const [afternoonDeadline, setAfternoonDeadline] = useState(user?.afternoonDeadline || '16:55');
+  const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'connected' | 'disconnected'>('unknown');
   // 添加一个标志，避免反复触发
   const [hasShownNameModal, setHasShownNameModal] = useState(false);
+
+  // 检查 Supabase 连接
+  useEffect(() => {
+    const checkConnection = async () => {
+      const isConnected = await checkSupabaseConnection();
+      setConnectionStatus(getConnectionStatus());
+    };
+
+    checkConnection();
+
+    // 每隔 30 秒检查一次连接
+    const interval = setInterval(checkConnection, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // 只在第一次检测到 user 为 null 且还没显示过 nameModal 时才显示
   useEffect(() => {
@@ -111,6 +129,12 @@ export const Home = () => {
   const today = new Date().toISOString().split('T')[0];
   const todayRecord = records.find(r => r.date === today);
   const todayStatus = todayRecord?.status || 'unchecked';
+  const todayLeavePeriod = todayRecord?.leavePeriod || 'none';
+  
+  // 判断某个时间段是否可以打卡
+  const canPunchMorning = todayLeavePeriod !== 'morning' && todayLeavePeriod !== 'full' && !todayRecord?.checkIn;
+  const canPunchAfternoon = todayLeavePeriod !== 'afternoon' && todayLeavePeriod !== 'full' && !todayRecord?.checkOut;
+  const isBeforeNoon = new Date().getHours() < 12;
   
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('zh-CN', {
@@ -130,77 +154,14 @@ export const Home = () => {
     punch(user.id, photoData, user.morningDeadline, user.afternoonDeadline);
   };
 
-  const handleLeave = async () => {
-    if (!user || todayRecord?.status === 'leave' || todayRecord?.status === 'vacation') return;
-
+  const handleApplyLeave = async (period: 'morning' | 'afternoon') => {
+    if (!user) return;
+    
     try {
-      const existingRecord = records.find(r => r.date === today);
-      const isLocalUser = user.id.startsWith('local_');
-
-      if (existingRecord) {
-        let updatedRecords;
-        if (isLocalUser) {
-          updatedRecords = records.map(r => {
-            if (r.id === existingRecord.id) {
-              return { ...r, status: 'leave' as const };
-            }
-            return r;
-          });
-        } else {
-          await supabase
-            .from('attendance_records')
-            .update({ 
-              status: 'leave',
-              updated_at: new Date().toISOString()
-            })
-            .eq('id', existingRecord.id);
-
-          updatedRecords = records.map(r => {
-            if (r.id === existingRecord.id) {
-              return { ...r, status: 'leave' as const };
-            }
-            return r;
-          });
-        }
-
-        const updatedRecord = { ...existingRecord, status: 'leave' as const };
-        loadRecords(user.id);
-        setTodayRecord(updatedRecord);
-      } else {
-        const newId = isLocalUser ? 'local_' + Date.now() : null;
-        const newRecord: any = {
-          id: newId,
-          user_id: user.id,
-          userId: user.id,
-          date: today,
-          status: 'leave',
-        };
-
-        if (isLocalUser) {
-          const updatedRecords = [...records, newRecord];
-          localStorage.setItem(`attendance_${user.id}`, JSON.stringify(updatedRecords));
-          loadRecords(user.id);
-        } else {
-          const { data: insertedRecord } = await supabase
-            .from('attendance_records')
-            .insert({
-              user_id: user.id,
-              date: today,
-              status: 'leave',
-            })
-            .select()
-            .single();
-
-          if (insertedRecord) {
-            loadRecords(user.id);
-          }
-        }
-      }
-
-      alert('请假已记录！');
+      await applyLeave(user.id, period);
+      setShowLeaveModal(false);
     } catch (error) {
       console.error('Leave error:', error);
-      alert('请假记录失败');
     }
   };
 
@@ -219,19 +180,49 @@ export const Home = () => {
     }
   };
 
-  const getStatusText = (status: string) => {
+  const getStatusText = (status: string, leavePeriod?: string) => {
+    if (status === 'leave') {
+      switch (leavePeriod) {
+        case 'morning':
+          return '上午请假';
+        case 'afternoon':
+          return '下午请假';
+        case 'full':
+          return '全天请假';
+        default:
+          return '请假中';
+      }
+    }
     switch (status) {
       case 'checked':
         return '已打卡';
       case 'late':
         return '迟到';
-      case 'leave':
-        return '请假中';
       case 'vacation':
         return '休假中';
       default:
         return '未打卡';
     }
+  };
+
+  const getConnectionIcon = () => {
+    if (user?.id.startsWith('local_')) {
+      return <WifiOff size={18} className="text-slate-400" />;
+    }
+    if (connectionStatus === 'connected') {
+      return <Wifi size={18} className="text-emerald-500" />;
+    }
+    return <WifiOff size={18} className="text-amber-500" />;
+  };
+
+  const getConnectionTitle = () => {
+    if (user?.id.startsWith('local_')) {
+      return '本地模式';
+    }
+    if (connectionStatus === 'connected') {
+      return '云端已连接';
+    }
+    return '云端连接失败';
   };
 
   return (
@@ -241,7 +232,12 @@ export const Home = () => {
           <div className="flex items-center justify-between mb-8">
             <div>
               <h1 className="text-2xl font-bold text-slate-900">{user.nickname}</h1>
-              <p className="text-slate-500">{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}</p>
+              <div className="flex items-center gap-2">
+                <p className="text-slate-500">{new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric' })}</p>
+                <span className="text-xs text-slate-400" title={getConnectionTitle()}>
+                  {getConnectionIcon()}
+                </span>
+              </div>
             </div>
             <div className="flex items-center gap-2">
               {!partner && !user.id.startsWith('local_') && (
@@ -298,30 +294,91 @@ export const Home = () => {
               
               <button
                 onClick={() => setShowCamera(true)}
-                className={`w-48 h-48 rounded-full ${getStatusColor(todayStatus)} flex items-center justify-center shadow-lg hover:scale-105 transition-transform ${todayStatus !== 'unchecked' ? 'opacity-50' : ''}`}
-                disabled={todayStatus !== 'unchecked'}
+                className={`w-48 h-48 rounded-full ${getStatusColor(todayStatus)} flex items-center justify-center shadow-lg hover:scale-105 transition-transform ${(todayStatus !== 'unchecked' && todayStatus !== 'leave') ? 'opacity-50' : ''}`}
+                disabled={todayStatus !== 'unchecked' && todayStatus !== 'leave'}
               >
                 <div className="text-white text-center">
-                  <div className="text-2xl font-bold mb-2">{getStatusText(todayStatus)}</div>
+                  <div className="text-2xl font-bold mb-2">{getStatusText(todayStatus, todayLeavePeriod)}</div>
                   <div className="text-sm opacity-80">点击打卡</div>
                 </div>
               </button>
               
-              <button
-                onClick={handleLeave}
-                disabled={todayStatus === 'leave' || todayStatus === 'vacation' || todayStatus !== 'unchecked'}
-                className={`mt-12 px-8 py-3 font-medium rounded-full shadow-lg transition-colors ${
-                  todayStatus === 'unchecked'
-                    ? 'bg-blue-500 text-white hover:bg-blue-600'
-                    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                }`}
-              >
-                {todayStatus === 'unchecked' ? '请假' : '已请假'}
-              </button>
+              <div className="mt-12 flex gap-4 w-full max-w-xs">
+                <button
+                  onClick={() => {
+                    // 根据当前时间判断上午还是下午
+                    const hour = new Date().getHours();
+                    const period = hour < 12 ? 'morning' : 'afternoon';
+                    const confirmText = period === 'morning' ? '上午' : '下午';
+                    
+                    if (confirm(`确定要请${confirmText}假吗？`)) {
+                      applyLeave(user.id, period);
+                    }
+                  }}
+                  className={`flex-1 px-6 py-3 font-medium rounded-full shadow-lg transition-colors ${
+                    todayStatus === 'vacation'
+                      ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                      : 'bg-blue-500 text-white hover:bg-blue-600'
+                  }`}
+                  disabled={todayStatus === 'vacation'}
+                >
+                  请假
+                </button>
+              </div>
             </div>
           </div>
         </div>
       </div>
+
+      {/* 请假模态框 */}
+      {showLeaveModal && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
+            <h3 className="text-xl font-bold text-slate-900 mb-4 text-center">选择请假时间</h3>
+            <div className="grid grid-cols-2 gap-4 mb-6">
+              <button
+                onClick={() => handleApplyLeave('morning')}
+                className={`p-6 rounded-xl border-2 transition-all ${
+                  todayLeavePeriod === 'morning' || todayLeavePeriod === 'full'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="text-2xl mb-2">🌅</div>
+                <div className="font-medium text-slate-900">上午</div>
+                <div className="text-sm text-slate-500">
+                  {todayLeavePeriod === 'morning' || todayLeavePeriod === 'full' ? '已请假' : ''}
+                </div>
+              </button>
+              <button
+                onClick={() => handleApplyLeave('afternoon')}
+                className={`p-6 rounded-xl border-2 transition-all ${
+                  todayLeavePeriod === 'afternoon' || todayLeavePeriod === 'full'
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-slate-200 hover:border-slate-300'
+                }`}
+              >
+                <div className="text-2xl mb-2">🌅</div>
+                <div className="font-medium text-slate-900">下午</div>
+                <div className="text-sm text-slate-500">
+                  {todayLeavePeriod === 'afternoon' || todayLeavePeriod === 'full' ? '已请假' : ''}
+                </div>
+              </button>
+            </div>
+            {todayLeavePeriod !== 'none' && (
+              <p className="text-center text-sm text-slate-500 mb-4">
+                再次点击可取消该时段请假
+              </p>
+            )}
+            <button
+              onClick={() => setShowLeaveModal(false)}
+              className="w-full py-3 bg-slate-100 text-slate-700 font-medium rounded-full hover:bg-slate-200 transition-colors"
+            >
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
 
       <SettingsModal
         isOpen={showSettings}
