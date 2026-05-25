@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState } from 'react';
 import { Clock, RefreshCw, UserPlus } from 'lucide-react';
 import { Card } from '../common/Card';
 import { Button } from '../common/Button';
@@ -16,22 +16,6 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
   const [isRestoring, setIsRestoring] = useState(false);
   const [showRestoreOption, setShowRestoreOption] = useState(false);
   const { checkNameExists, restoreUserByName } = useAuthStore();
-  const wasOpen = useRef(false);
-
-  // 只在第一次打开时重置状态
-  useEffect(() => {
-    if (isOpen && !wasOpen.current) {
-      setName('');
-      setError('');
-      setIsSubmitting(false);
-      setIsRestoring(false);
-      setShowRestoreOption(false);
-      wasOpen.current = true;
-    }
-    if (!isOpen) {
-      wasOpen.current = false;
-    }
-  }, [isOpen]);
 
   if (!isOpen) return null;
 
@@ -153,6 +137,7 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
                 onChange={(e) => setName(e.target.value)}
                 placeholder="请输入您的名字"
                 autoComplete="off"
+                autoFocus
                 className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-slate-400 focus:outline-none transition-colors text-slate-900"
               />
             </div>
