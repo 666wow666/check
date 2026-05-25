@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { User } from '../types';
 import { supabase } from '../config/supabase';
+import { saveLocalRecords } from './attendanceStore';
 
 const generateDeviceId = () => {
   const stored = localStorage.getItem('deviceId');
@@ -38,6 +39,8 @@ interface AuthState {
   currentPair: Pair | null;
   initialize: () => Promise<void>;
   register: (name: string) => Promise<User>;
+  checkNameExists: (name: string) => Promise<boolean>;
+  restoreUserByName: (name: string) => Promise<User | null>;
   updateNickname: (nickname: string) => Promise<void>;
   updateDeadlines: (morning: string, afternoon: string) => Promise<void>;
   loadAllUsers: () => Promise<User[]>;
@@ -79,6 +82,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
             }
           }
         } else {
+          // 尝试从云端同步最新数据
           if (!userData.id.startsWith('local_')) {
             try {
               const { data: remoteUser } = await supabase
@@ -120,91 +124,130 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     set({ user: null, isLoading: false });
   },
 
+  checkNameExists: async (name: string): Promise<boolean> => {
+    const normalizedName = name.trim().toLowerCase();
+    try {
+      const { data } = await supabase
+        .from('users')
+        .select('id, name')
+        .eq('name', normalizedName)
+        .maybeSingle();
+      
+      return !!data;
+    } catch (error) {
+      console.error('Check name error:', error);
+      return false;
+    }
+  },
+
+  restoreUserByName: async (name: string): Promise<User | null> => {
+    const normalizedName = name.trim().toLowerCase();
+    try {
+      const { data: remoteUser } = await supabase
+        .from('users')
+        .select('*')
+        .eq('name', normalizedName)
+        .maybeSingle();
+
+      if (remoteUser) {
+        const restoredUser: User = {
+          id: remoteUser.id,
+          name: remoteUser.name,
+          nickname: remoteUser.nickname,
+          deviceId: remoteUser.device_id,
+          morningDeadline: remoteUser.morning_deadline || '06:30',
+          afternoonDeadline: remoteUser.afternoon_deadline || '16:55',
+        };
+        
+        set({ user: restoredUser, isLoading: false });
+        localStorage.setItem('user', JSON.stringify(restoredUser));
+        
+        // 同步打卡数据
+        try {
+          const { data: records } = await supabase
+            .from('attendance_records')
+            .select('*')
+            .eq('user_id', remoteUser.id)
+            .order('date', { ascending: false });
+          
+          if (records && records.length > 0) {
+            saveLocalRecords(remoteUser.id, records.map(r => ({
+              id: r.id,
+              userId: r.user_id,
+              date: r.date,
+              checkIn: r.check_in,
+              checkOut: r.check_out,
+              checkInPhoto: r.check_in_photo,
+              checkOutPhoto: r.check_out_photo,
+              status: r.status,
+              leavePeriod: r.leave_period || 'none',
+            })));
+          }
+        } catch (e) {
+          console.error('Sync records error:', e);
+        }
+        
+        await get().initializePair();
+        return restoredUser;
+      }
+      
+      return null;
+    } catch (error) {
+      console.error('Restore user error:', error);
+      return null;
+    }
+  },
+
   register: async (name: string) => {
+    const normalizedName = name.trim().toLowerCase();
     const deviceId = generateDeviceId();
     
-    // 立即创建本地用户，确保 UI 不会卡住
+    // 先检查云端是否已有该名字
+    const nameExists = await get().checkNameExists(normalizedName);
+    if (nameExists) {
+      throw new Error('该称呼已存在，请使用其他称呼或尝试恢复账号');
+    }
+    
+    // 立即创建本地用户
     const localUser: User = {
       id: 'local_' + Date.now(),
-      name: name.trim(),
+      name: normalizedName,
       nickname: name.trim(),
       deviceId: deviceId,
       morningDeadline: '06:30',
       afternoonDeadline: '16:55',
     };
     
-    // 先设置本地用户，让用户可以立即使用
     set({ user: localUser, isLoading: false });
     localStorage.setItem('user', JSON.stringify(localUser));
     
-    // 尝试同步到云端（后台进行，不阻塞 UI）
+    // 后台同步到云端
     setTimeout(async () => {
       try {
         const userData = {
           device_id: deviceId,
-          name: name.trim(),
+          name: normalizedName,
           nickname: name.trim(),
           morning_deadline: '06:30',
           afternoon_deadline: '16:55',
         };
 
-        // 检查是否已有该设备用户
-        const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 5000); // 5秒超时
-
-        const { data: existingUser } = await supabase
+        const { data: newUser } = await supabase
           .from('users')
-          .select('*')
-          .eq('device_id', deviceId)
+          .insert(userData)
+          .select()
           .single();
 
-        clearTimeout(timeoutId);
-
-        let cloudUser: User | undefined;
-
-        if (existingUser) {
-          // 更新现有用户
-          const { data: updatedUser } = await supabase
-            .from('users')
-            .update({ 
-              name: name.trim(), 
-              nickname: name.trim(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('device_id', deviceId)
-            .select()
-            .single();
-
-          cloudUser = {
-            id: updatedUser?.id || existingUser.id,
-            name: updatedUser?.name || existingUser.name,
-            nickname: updatedUser?.nickname || existingUser.nickname,
-            deviceId: updatedUser?.device_id || existingUser.device_id,
-            morningDeadline: updatedUser?.morning_deadline || existingUser.morning_deadline || '06:30',
-            afternoonDeadline: updatedUser?.afternoon_deadline || existingUser.afternoon_deadline || '16:55',
+        if (newUser) {
+          const cloudUser: User = {
+            id: newUser.id,
+            name: newUser.name,
+            nickname: newUser.nickname,
+            deviceId: newUser.device_id,
+            morningDeadline: newUser.morning_deadline,
+            afternoonDeadline: newUser.afternoon_deadline,
           };
-        } else {
-          // 创建新用户
-          const { data: newUser } = await supabase
-            .from('users')
-            .insert(userData)
-            .select()
-            .single();
-
-          if (newUser) {
-            cloudUser = {
-              id: newUser.id,
-              name: newUser.name,
-              nickname: newUser.nickname,
-              deviceId: newUser.device_id,
-              morningDeadline: newUser.morning_deadline,
-              afternoonDeadline: newUser.afternoon_deadline,
-            };
-          }
-        }
-
-        // 如果有云端用户，更新本地存储（避免循环更新）
-        if (cloudUser) {
+          
           localStorage.setItem('user', JSON.stringify(cloudUser));
           const { user: currentUser } = get();
           if (currentUser?.id !== cloudUser.id) {
@@ -212,12 +255,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           }
           await get().initializePair();
         }
-
-        // 如果云端创建成功但用户对象创建失败，使用本地用户继续
-        console.log('Cloud sync completed');
       } catch (error) {
-        console.error('Cloud sync error (continuing with local user):', error);
-        // 继续使用本地用户，不阻塞用户操作
+        console.error('Cloud sync error:', error);
       }
     }, 0);
 
@@ -226,29 +265,53 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   updateNickname: async (nickname: string) => {
     const { user } = get();
-    if (user && user.id.startsWith('local_')) {
-      const updatedUser = { ...user, nickname };
+    if (!user) return;
+
+    const normalizedName = nickname.trim().toLowerCase();
+    
+    // 检查新名字是否被其他用户占用
+    if (normalizedName !== user.name) {
+      try {
+        const { data: existingUser } = await supabase
+          .from('users')
+          .select('id')
+          .eq('name', normalizedName)
+          .maybeSingle();
+        
+        if (existingUser && existingUser.id !== user.id) {
+          throw new Error('该称呼已被其他用户使用');
+        }
+      } catch (error) {
+        if (error instanceof Error && error.message !== '该称呼已被其他用户使用') {
+          console.error('Check name error:', error);
+        }
+        throw error;
+      }
+    }
+
+    if (user.id.startsWith('local_')) {
+      const updatedUser = { ...user, nickname, name: normalizedName };
       set({ user: updatedUser });
       localStorage.setItem('user', JSON.stringify(updatedUser));
       return;
     }
 
-    if (user) {
-      try {
-        await supabase
-          .from('users')
-          .update({ 
-            nickname, 
-            updated_at: new Date().toISOString() 
-          })
-          .eq('id', user.id);
+    try {
+      await supabase
+        .from('users')
+        .update({ 
+          name: normalizedName,
+          nickname, 
+          updated_at: new Date().toISOString() 
+        })
+        .eq('id', user.id);
 
-        const updatedUser = { ...user, nickname };
-        set({ user: updatedUser });
-        localStorage.setItem('user', JSON.stringify(updatedUser));
-      } catch (error) {
-        console.error('Update nickname error:', error);
-      }
+      const updatedUser = { ...user, name: normalizedName, nickname };
+      set({ user: updatedUser });
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+    } catch (error) {
+      console.error('Update nickname error:', error);
+      throw error;
     }
   },
 

@@ -5,7 +5,7 @@ import { supabase } from '../config/supabase';
 
 const getLocalRecordsKey = (userId: string) => `attendance_${userId}`;
 
-const saveLocalRecords = (userId: string, records: AttendanceRecord[]) => {
+export const saveLocalRecords = (userId: string, records: AttendanceRecord[]) => {
   localStorage.setItem(getLocalRecordsKey(userId), JSON.stringify(records));
 };
 
@@ -422,10 +422,10 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
     set({ todayRecord: record });
   },
 
-  subscribeToAttendance: (userId: string, partnerId: string, onPartnerUpdate: (record: AttendanceRecord | null) => void) => {
+  subscribeToAttendance: (userId: string, partnerId: string | undefined, onPartnerUpdate: (record: AttendanceRecord | null) => void) => {
     const { channel } = get();
 
-    if (partnerId.startsWith('local_')) {
+    if (!partnerId || partnerId.startsWith('local_')) {
       return;
     }
 

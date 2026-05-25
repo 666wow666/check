@@ -12,6 +12,7 @@ interface SettingsModalProps {
   afternoonDeadline: string;
   onAfternoonChange: (time: string) => void;
   onSave: () => void;
+  error?: string;
 }
 
 export const SettingsModal = ({
@@ -23,7 +24,8 @@ export const SettingsModal = ({
   onMorningChange,
   afternoonDeadline,
   onAfternoonChange,
-  onSave
+  onSave,
+  error
 }: SettingsModalProps) => {
   if (!isOpen) return null;
 
@@ -33,7 +35,7 @@ export const SettingsModal = ({
         <div className="flex items-center justify-between mb-6">
           <h3 className="text-lg font-semibold text-slate-900">设置</h3>
           <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-lg">
-            <X size={18} className="text-slate-500" />
+            <X size={18} className="text-slate-50" />
           </button>
         </div>
         
@@ -47,7 +49,16 @@ export const SettingsModal = ({
               placeholder="输入你的称呼"
               className="w-full px-4 py-3 rounded-lg border border-slate-200 focus:border-slate-400 focus:outline-none"
             />
+            <p className="text-xs text-slate-400 mt-1">
+              称呼也是您的登录账号，修改后请牢记
+            </p>
           </div>
+          
+          {error && (
+            <div className="text-sm text-amber-600 bg-amber-50 p-3 rounded-lg">
+              {error}
+            </div>
+          )}
           
           <div className="border-t border-slate-200 pt-4">
             <h4 className="text-sm font-medium text-slate-700 mb-3">设置打卡截止时间</h4>

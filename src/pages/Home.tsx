@@ -41,6 +41,7 @@ export const Home = () => {
   const [morningDeadline, setMorningDeadline] = useState(user?.morningDeadline || '06:30');
   const [afternoonDeadline, setAfternoonDeadline] = useState(user?.afternoonDeadline || '16:55');
   const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'connected' | 'disconnected'>('unknown');
+  const [settingsError, setSettingsError] = useState('');
   // 添加一个标志，避免反复触发
   const [hasShownNameModal, setHasShownNameModal] = useState(false);
 
@@ -131,10 +132,15 @@ export const Home = () => {
   const todayStatus = todayRecord?.status || 'unchecked';
   const todayLeavePeriod = todayRecord?.leavePeriod || 'none';
   
+  const isBeforeNoon = new Date().getHours() < 12;
+  
   // 判断某个时间段是否可以打卡
   const canPunchMorning = todayLeavePeriod !== 'morning' && todayLeavePeriod !== 'full' && !todayRecord?.checkIn;
   const canPunchAfternoon = todayLeavePeriod !== 'afternoon' && todayLeavePeriod !== 'full' && !todayRecord?.checkOut;
-  const isBeforeNoon = new Date().getHours() < 12;
+  
+  // 判断某个时间段是否可以请假（已打卡则不能请假）
+  const canLeaveMorning = !todayRecord?.checkIn && todayLeavePeriod !== 'morning' && todayLeavePeriod !== 'full';
+  const canLeaveAfternoon = !todayRecord?.checkOut && todayLeavePeriod !== 'afternoon' && todayLeavePeriod !== 'full';
   
   const formatTime = (date: Date) => {
     return date.toLocaleTimeString('zh-CN', {
@@ -144,10 +150,20 @@ export const Home = () => {
     });
   };
 
-  const handleSettingsSave = () => {
-    updateNickname(nickname);
-    updateDeadlines(morningDeadline, afternoonDeadline);
-    setShowSettings(false);
+  const handleSettingsSave = async () => {
+    try {
+      setSettingsError('');
+      await updateNickname(nickname);
+      await updateDeadlines(morningDeadline, afternoonDeadline);
+      setShowSettings(false);
+    } catch (error) {
+      console.error('Save settings error:', error);
+      if (error instanceof Error) {
+        setSettingsError(error.message);
+      } else {
+        setSettingsError('保存失败，请重试');
+      }
+    }
   };
 
   const handleCapture = (photoData: string) => {
@@ -203,6 +219,34 @@ export const Home = () => {
       default:
         return '未打卡';
     }
+  };
+
+  const getCurrentPeriodStatus = () => {
+    if (isBeforeNoon) {
+      if (todayRecord?.checkIn) {
+        return todayRecord.status === 'late' ? '迟到' : '上午已打卡';
+      }
+      if (todayLeavePeriod === 'morning' || todayLeavePeriod === 'full') {
+        return '上午请假';
+      }
+      return '点击打卡';
+    } else {
+      if (todayRecord?.checkOut) {
+        return todayRecord.status === 'late' ? '迟到' : '下午已打卡';
+      }
+      if (todayLeavePeriod === 'afternoon' || todayLeavePeriod === 'full') {
+        return '下午请假';
+      }
+      return '点击打卡';
+    }
+  };
+
+  const getCurrentPeriodButtonText = () => {
+    const canPunch = isBeforeNoon ? canPunchMorning : canPunchAfternoon;
+    if (canPunch) {
+      return isBeforeNoon ? '上午打卡' : '下午打卡';
+    }
+    return getCurrentPeriodStatus();
   };
 
   const getConnectionIcon = () => {
@@ -294,11 +338,11 @@ export const Home = () => {
               
               <button
                 onClick={() => setShowCamera(true)}
-                className={`w-48 h-48 rounded-full ${getStatusColor(todayStatus)} flex items-center justify-center shadow-lg hover:scale-105 transition-transform ${(todayStatus !== 'unchecked' && todayStatus !== 'leave') ? 'opacity-50' : ''}`}
-                disabled={todayStatus !== 'unchecked' && todayStatus !== 'leave'}
+                className={`w-48 h-48 rounded-full ${getStatusColor(todayStatus)} flex items-center justify-center shadow-lg hover:scale-105 transition-transform ${(isBeforeNoon ? !canPunchMorning : !canPunchAfternoon) ? 'opacity-50' : ''}`}
+                disabled={isBeforeNoon ? !canPunchMorning : !canPunchAfternoon}
               >
                 <div className="text-white text-center">
-                  <div className="text-2xl font-bold mb-2">{getStatusText(todayStatus, todayLeavePeriod)}</div>
+                  <div className="text-2xl font-bold mb-2">{getCurrentPeriodButtonText()}</div>
                   <div className="text-sm opacity-80">点击打卡</div>
                 </div>
               </button>
@@ -306,9 +350,14 @@ export const Home = () => {
               <div className="mt-12 flex gap-4 w-full max-w-xs">
                 <button
                   onClick={() => {
-                    // 根据当前时间判断上午还是下午
-                    const hour = new Date().getHours();
-                    const period = hour < 12 ? 'morning' : 'afternoon';
+                    const period = isBeforeNoon ? 'morning' : 'afternoon';
+                    const canLeave = period === 'morning' ? canLeaveMorning : canLeaveAfternoon;
+                    
+                    if (!canLeave) {
+                      alert('该时段已打卡，无法请假');
+                      return;
+                    }
+                    
                     const confirmText = period === 'morning' ? '上午' : '下午';
                     
                     if (confirm(`确定要请${confirmText}假吗？`)) {
@@ -316,11 +365,11 @@ export const Home = () => {
                     }
                   }}
                   className={`flex-1 px-6 py-3 font-medium rounded-full shadow-lg transition-colors ${
-                    todayStatus === 'vacation'
+                    todayStatus === 'vacation' || (isBeforeNoon ? !canLeaveMorning : !canLeaveAfternoon)
                       ? 'bg-slate-200 text-slate-400 cursor-not-allowed'
                       : 'bg-blue-500 text-white hover:bg-blue-600'
                   }`}
-                  disabled={todayStatus === 'vacation'}
+                  disabled={todayStatus === 'vacation' || (isBeforeNoon ? !canLeaveMorning : !canLeaveAfternoon)}
                 >
                   请假
                 </button>
@@ -382,7 +431,10 @@ export const Home = () => {
 
       <SettingsModal
         isOpen={showSettings}
-        onClose={() => setShowSettings(false)}
+        onClose={() => {
+          setShowSettings(false);
+          setSettingsError('');
+        }}
         nickname={nickname}
         onNicknameChange={setNickname}
         morningDeadline={morningDeadline}
@@ -390,6 +442,7 @@ export const Home = () => {
         afternoonDeadline={afternoonDeadline}
         onAfternoonChange={setAfternoonDeadline}
         onSave={handleSettingsSave}
+        error={settingsError}
       />
 
       <CameraModal
