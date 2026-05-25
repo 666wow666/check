@@ -110,6 +110,7 @@ export const Billing = () => {
             checkInPhoto: r.check_in_photo,
             checkOutPhoto: r.check_out_photo,
             status: r.status,
+            leavePeriod: r.leave_period || 'none',
           }));
           setPartnerRecords(mapped);
         }

@@ -34,5 +34,3 @@ android/captures
 ios/Pods
 *.xcuserstate
 *.xcuserdatad
-
-*.md

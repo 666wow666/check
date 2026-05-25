@@ -16,6 +16,8 @@ export interface AttendanceRecord {
   checkInPhoto: string | null;
   checkOutPhoto: string | null;
   status: 'unchecked' | 'checked' | 'late' | 'leave' | 'vacation';
+  // 半天请假支持
+  leavePeriod: 'none' | 'morning' | 'afternoon' | 'full';
 }
 
 export interface LeaveRecord {

@@ -25,6 +25,7 @@ const loadLocalRecords = (userId: string): AttendanceRecord[] => {
       checkInPhoto: record.checkInPhoto || record.check_in_photo,
       checkOutPhoto: record.checkOutPhoto || record.check_out_photo,
       status: record.status,
+      leavePeriod: record.leavePeriod || 'none',
     };
   });
 };
@@ -37,6 +38,7 @@ interface AttendanceState {
   loadRecords: (userId: string) => Promise<void>;
   loadPartnerRecord: (partnerId: string) => Promise<void>;
   punch: (userId: string, photoData: string, morningDeadline: string, afternoonDeadline: string) => Promise<void>;
+  applyLeave: (userId: string, period: 'morning' | 'afternoon') => Promise<void>;
   getTodayRecord: (userId: string) => AttendanceRecord | null;
   getMonthlyRecords: (userId: string, month: string) => AttendanceRecord[];
   calculateMonthlyStats: (userId: string, month: string) => {
@@ -78,6 +80,7 @@ const mapDbToRecord = (data: any): AttendanceRecord => ({
   checkInPhoto: data.check_in_photo,
   checkOutPhoto: data.check_out_photo,
   status: data.status,
+  leavePeriod: data.leave_period || 'none',
 });
 
 export const useAttendanceStore = create<AttendanceState>((set, get) => ({
@@ -249,6 +252,7 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
             checkInPhoto: isBefore12 ? photoData : null,
             checkOutPhoto: !isBefore12 ? photoData : null,
             status: late ? 'late' : 'checked',
+            leavePeriod: 'none',
           };
         } else {
           const { data: newRecord } = await supabase
@@ -266,6 +270,130 @@ export const useAttendanceStore = create<AttendanceState>((set, get) => ({
       }
     } catch (error) {
       console.error('Punch error:', error);
+    }
+  },
+
+  applyLeave: async (userId: string, period: 'morning' | 'afternoon') => {
+    const today = getTodayDateString();
+    const { records } = get();
+
+    const existingRecord = records.find(r => r.userId === userId && r.date === today);
+    const isLocalUser = userId.startsWith('local_');
+
+    try {
+      let newStatus = 'leave';
+      let newLeavePeriod: 'none' | 'morning' | 'afternoon' | 'full' = period;
+
+      // 如果已经存在记录
+      if (existingRecord) {
+        // 如果已经请假半天，再请假另半天则转为全天
+        if (existingRecord.leavePeriod === 'morning' && period === 'afternoon' ||
+            existingRecord.leavePeriod === 'afternoon' && period === 'morning') {
+          newLeavePeriod = 'full';
+        } else if ((existingRecord.leavePeriod as any) === period) {
+          // 如果请假相同时间段，取消请假
+          newLeavePeriod = 'none';
+          newStatus = existingRecord.checkIn || existingRecord.checkOut ? 
+                     (existingRecord.status === 'late' ? 'late' : 'checked') : 'unchecked';
+        }
+
+        const updateData: any = {
+          updated_at: new Date().toISOString(),
+          leave_period: newLeavePeriod,
+        };
+
+        // 如果取消请假，根据已有打卡状态设置
+        if (newLeavePeriod === 'none') {
+          updateData.status = newStatus;
+        } else {
+          updateData.status = 'leave';
+        }
+
+        let updatedRecords;
+        if (isLocalUser) {
+          updatedRecords = records.map(r => {
+            if (r.id === existingRecord.id) {
+              const updatedRecord = { ...r };
+              updatedRecord.leavePeriod = newLeavePeriod;
+              updatedRecord.status = newStatus as any;
+              return updatedRecord;
+            }
+            return r;
+          });
+        } else {
+          await supabase
+            .from('attendance_records')
+            .update(updateData)
+            .eq('id', existingRecord.id);
+
+          updatedRecords = records.map(r => {
+            if (r.id === existingRecord.id) {
+              const updatedRecord = { ...r };
+              updatedRecord.leavePeriod = newLeavePeriod;
+              updatedRecord.status = newStatus as any;
+              return updatedRecord;
+            }
+            return r;
+          });
+        }
+
+        set({ records: updatedRecords });
+        saveLocalRecords(userId, updatedRecords);
+        const updatedTodayRecord = updatedRecords.find(r => r.id === existingRecord.id) || null;
+        set({ todayRecord: updatedTodayRecord });
+      } else {
+        // 创建新记录
+        const newId = isLocalUser ? 'local_' + Date.now() : null;
+        const newRecordData: any = isLocalUser ? {
+          id: newId,
+          user_id: userId,
+          date: today,
+          check_in: null,
+          check_out: null,
+          check_in_photo: null,
+          check_out_photo: null,
+          status: 'leave',
+          leave_period: period,
+        } : {
+          user_id: userId,
+          date: today,
+          check_in: null,
+          check_out: null,
+          check_in_photo: null,
+          check_out_photo: null,
+          status: 'leave',
+          leave_period: period,
+        };
+
+        let newRecordMapped: AttendanceRecord;
+        if (isLocalUser) {
+          newRecordMapped = {
+            id: newId as string,
+            userId: userId,
+            date: today,
+            checkIn: null,
+            checkOut: null,
+            checkInPhoto: null,
+            checkOutPhoto: null,
+            status: 'leave',
+            leavePeriod: period,
+          };
+        } else {
+          const { data: newRecord } = await supabase
+            .from('attendance_records')
+            .insert(newRecordData)
+            .select()
+            .single();
+          
+          newRecordMapped = mapDbToRecord(newRecord);
+        }
+
+        const updatedRecords = [...records, newRecordMapped];
+        set({ records: updatedRecords, todayRecord: newRecordMapped });
+        saveLocalRecords(userId, updatedRecords);
+      }
+    } catch (error) {
+      console.error('Apply leave error:', error);
     }
   },
 
