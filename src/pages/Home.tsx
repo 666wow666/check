@@ -8,7 +8,7 @@ import { CameraModal } from '../components/layout/CameraModal';
 import { NameModal } from '../components/layout/NameModal';
 import { PairModal } from '../components/layout/PairModal';
 import { AttendanceRecord } from '../types';
-import { checkSupabaseConnection, isSupabaseConnected, getConnectionStatus } from '../config/supabase';
+import { getConnectionStatus } from '../config/supabase';
 
 export const Home = () => {
   const { 
@@ -47,8 +47,8 @@ export const Home = () => {
   // 检查 Supabase 连接
   useEffect(() => {
     const checkConnection = async () => {
-      const isConnected = await checkSupabaseConnection();
-      setConnectionStatus(getConnectionStatus());
+      const status = await getConnectionStatus();
+      setConnectionStatus(status);
     };
 
     checkConnection();

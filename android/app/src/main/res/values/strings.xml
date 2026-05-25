@@ -1,7 +1,0 @@
-<?xml version='1.0' encoding='utf-8'?>
-<resources>
-    <string name="app_name">考勤助手</string>
-    <string name="title_activity_main">考勤助手</string>
-    <string name="package_name">com.attendance.app</string>
-    <string name="custom_url_scheme">com.attendance.app</string>
-</resources>
