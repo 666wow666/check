@@ -68,6 +68,13 @@ export const Home = () => {
     }
   }, [user, hasShownNameModal]);
 
+  // 当 user 变为有值时，确保关闭 nameModal
+  useEffect(() => {
+    if (user) {
+      setShowNameModal(false);
+    }
+  }, [user]);
+
   useEffect(() => {
     if (user) {
       loadRecords(user.id);

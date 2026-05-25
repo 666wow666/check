@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Clock, RefreshCw, UserPlus } from 'lucide-react';
 import { Card } from '../common/Card';
 import { Button } from '../common/Button';
@@ -16,14 +16,20 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
   const [isRestoring, setIsRestoring] = useState(false);
   const [showRestoreOption, setShowRestoreOption] = useState(false);
   const { checkNameExists, restoreUserByName } = useAuthStore();
+  const wasOpen = useRef(false);
 
   // 只在第一次打开时重置状态
   useEffect(() => {
-    if (isOpen && !name && !error && !isSubmitting) {
+    if (isOpen && !wasOpen.current) {
+      setName('');
       setError('');
       setIsSubmitting(false);
       setIsRestoring(false);
       setShowRestoreOption(false);
+      wasOpen.current = true;
+    }
+    if (!isOpen) {
+      wasOpen.current = false;
     }
   }, [isOpen]);
 
