@@ -24,7 +24,7 @@ export const PairModal = ({ isOpen, onClose }: PairModalProps) => {
         if (currentPair.status === 'active') {
           onClose();
         } else {
-          setMode('create');
+          setMode('select');
           setPairCode(currentPair.pairCode);
         }
       } else {
@@ -91,9 +91,14 @@ export const PairModal = ({ isOpen, onClose }: PairModalProps) => {
     setError('');
 
     try {
-      const code = await createPairCode();
-      setPairCode(code);
-      setMode('create');
+      if (currentPair && currentPair.status === 'pending') {
+        setPairCode(currentPair.pairCode);
+        setMode('create');
+      } else {
+        const code = await createPairCode();
+        setPairCode(code);
+        setMode('create');
+      }
     } catch (err: any) {
       setError(err.message || '创建配对失败');
     } finally {
@@ -190,6 +195,12 @@ export const PairModal = ({ isOpen, onClose }: PairModalProps) => {
             <p className="text-xs text-slate-500 text-center">
               等待对方加入...
             </p>
+            <button 
+              onClick={() => setMode('select')}
+              className="w-full text-sm text-slate-500 hover:text-slate-700 py-2"
+            >
+              返回
+            </button>
           </div>
         )}
 
