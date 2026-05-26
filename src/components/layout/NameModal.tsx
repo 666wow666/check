@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { Clock, RefreshCw, UserPlus } from 'lucide-react';
 import { Card } from '../common/Card';
 import { Button } from '../common/Button';
@@ -9,6 +9,8 @@ interface NameModalProps {
   onSubmit: (name: string) => void;
 }
 
+const STORAGE_KEY = 'temp_name_input';
+
 export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
   const [name, setName] = useState('');
   const [error, setError] = useState('');
@@ -16,8 +18,45 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
   const [isRestoring, setIsRestoring] = useState(false);
   const [showRestoreOption, setShowRestoreOption] = useState(false);
   const { checkNameExists, restoreUserByName } = useAuthStore();
+  
+  const nameRef = useRef(name);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    nameRef.current = name;
+  }, [name]);
+
+  useEffect(() => {
+    if (isOpen) {
+      const savedName = localStorage.getItem(STORAGE_KEY);
+      if (savedName && savedName.trim()) {
+        setName(savedName.trim());
+        if (inputRef.current) {
+          inputRef.current.value = savedName.trim();
+        }
+      }
+      
+      return () => {
+        if (nameRef.current.trim()) {
+          localStorage.setItem(STORAGE_KEY, nameRef.current.trim());
+        }
+      };
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (name.trim()) {
+      localStorage.setItem(STORAGE_KEY, name.trim());
+    }
+  }, [name]);
 
   if (!isOpen) return null;
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    nameRef.current = value;
+    setName(value);
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -26,15 +65,16 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
     
     setError('');
 
-    if (!name.trim()) {
+    if (!nameRef.current.trim()) {
       setError('请输入您的名字');
       return;
     }
 
-    // 先检查名字是否存在
+    const currentName = nameRef.current.trim();
+
     try {
       setIsSubmitting(true);
-      const exists = await checkNameExists(name.trim());
+      const exists = await checkNameExists(currentName);
       
       if (exists && !showRestoreOption) {
         setShowRestoreOption(true);
@@ -43,18 +83,18 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
       }
 
       if (exists && showRestoreOption) {
-        // 尝试恢复账号
         setIsRestoring(true);
-        const restoredUser = await restoreUserByName(name.trim());
+        const restoredUser = await restoreUserByName(currentName);
         if (restoredUser) {
-          return; // 成功恢复，组件会关闭
+          localStorage.removeItem(STORAGE_KEY);
+          return;
         } else {
           setError('恢复失败，请重试');
         }
         setIsRestoring(false);
       } else {
-        // 新用户注册
-        await onSubmit(name.trim());
+        localStorage.removeItem(STORAGE_KEY);
+        await onSubmit(currentName);
       }
     } catch (error) {
       console.error('提交名字失败:', error);
@@ -71,6 +111,7 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
   const handleNewAccount = () => {
     setShowRestoreOption(false);
     setError('');
+    localStorage.removeItem(STORAGE_KEY);
   };
 
   return (
@@ -91,7 +132,7 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
             <div className="p-4 bg-amber-50 rounded-lg text-center">
               <p className="text-amber-800 text-sm mb-2">
                 检测到"
-                <span className="font-semibold">{name.trim()}</span>
+                <span className="font-semibold">{nameRef.current.trim()}</span>
                 "已存在账号
               </p>
               <div className="flex gap-3">
@@ -99,9 +140,11 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
                   onClick={async () => {
                     setIsRestoring(true);
                     try {
-                      const restoredUser = await restoreUserByName(name.trim());
+                      const restoredUser = await restoreUserByName(nameRef.current.trim());
                       if (!restoredUser) {
                         setError('恢复失败，请重试');
+                      } else {
+                        localStorage.removeItem(STORAGE_KEY);
                       }
                     } catch (e) {
                       setError('恢复失败，请重试');
@@ -132,9 +175,10 @@ export const NameModal = ({ isOpen, onSubmit }: NameModalProps) => {
                 名字
               </label>
               <input
+                ref={inputRef}
                 type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
+                defaultValue={name}
+                onChange={handleInputChange}
                 placeholder="请输入您的名字"
                 autoComplete="off"
                 autoFocus

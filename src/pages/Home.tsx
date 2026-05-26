@@ -9,6 +9,7 @@ import { NameModal } from '../components/layout/NameModal';
 import { PairModal } from '../components/layout/PairModal';
 import { AttendanceRecord } from '../types';
 import { getConnectionStatus } from '../config/supabase';
+import { supabase } from '../config/supabase';
 
 export const Home = () => {
   const { 
@@ -18,7 +19,9 @@ export const Home = () => {
     updateDeadlines, 
     currentPair,
     partner,
-    partnerRecord
+    partnerRecord,
+    loadCurrentPair,
+    loadPartnerInfo
   } = useAuthStore();
   const { 
     records, 
@@ -42,10 +45,8 @@ export const Home = () => {
   const [afternoonDeadline, setAfternoonDeadline] = useState(user?.afternoonDeadline || '16:55');
   const [connectionStatus, setConnectionStatus] = useState<'unknown' | 'connected' | 'disconnected'>('unknown');
   const [settingsError, setSettingsError] = useState('');
-  // 添加一个标志，避免反复触发
   const [hasShownNameModal, setHasShownNameModal] = useState(false);
 
-  // 检查 Supabase 连接
   useEffect(() => {
     const checkConnection = async () => {
       const status = await getConnectionStatus();
@@ -54,13 +55,11 @@ export const Home = () => {
 
     checkConnection();
 
-    // 每隔 30 秒检查一次连接
     const interval = setInterval(checkConnection, 30000);
 
     return () => clearInterval(interval);
   }, []);
 
-  // 只在第一次检测到 user 为 null 且还没显示过 nameModal 时才显示
   useEffect(() => {
     if (!user && !hasShownNameModal) {
       setShowNameModal(true);
@@ -68,7 +67,6 @@ export const Home = () => {
     }
   }, [user, hasShownNameModal]);
 
-  // 当 user 变为有值时，确保关闭 nameModal
   useEffect(() => {
     if (user) {
       setShowNameModal(false);
@@ -85,8 +83,53 @@ export const Home = () => {
   }, [user, loadRecords]);
 
   useEffect(() => {
+    if (user) {
+      loadCurrentPair();
+    }
+  }, [user, loadCurrentPair]);
+
+  useEffect(() => {
+    let pairChannel: any = null;
+    
+    if (user && !user.id.startsWith('local_')) {
+      try {
+        pairChannel = supabase
+          .channel('pair-status-global')
+          .on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'public',
+              table: 'pairs',
+              filter: `or(user1_id.eq.${user.id},user2_id.eq.${user.id})`
+            },
+            async (payload: any) => {
+              console.log('Pair status changed:', payload);
+              
+              if (payload.new?.status === 'active') {
+                await loadCurrentPair();
+                await loadPartnerInfo();
+              }
+            }
+          )
+          .subscribe((status: string) => {
+            console.log('Pair subscription status:', status);
+          });
+      } catch (error) {
+        console.error('Failed to subscribe to pair changes:', error);
+      }
+    }
+
+    return () => {
+      if (pairChannel) {
+        supabase.removeChannel(pairChannel);
+      }
+    };
+  }, [user, loadCurrentPair, loadPartnerInfo]);
+
+  useEffect(() => {
     if (user && currentPair?.status === 'active') {
-      loadPartnerRecord(partner?.id);
+      loadPartnerInfo();
       subscribeToAttendance(user.id, partner?.id, handlePartnerUpdate);
     }
 
@@ -109,13 +152,10 @@ export const Home = () => {
 
   const handleNameSubmit = async (name: string) => {
     try {
-      // 先立即关闭模态框，避免状态更新导致重新打开
       setShowNameModal(false);
-      // 然后执行注册
       await register(name);
     } catch (error) {
       console.error('注册失败:', error);
-      // 如果注册失败，重新显示模态框
       setShowNameModal(true);
     }
   };
@@ -141,11 +181,9 @@ export const Home = () => {
   
   const isBeforeNoon = new Date().getHours() < 12;
   
-  // 判断某个时间段是否可以打卡
   const canPunchMorning = todayLeavePeriod !== 'morning' && todayLeavePeriod !== 'full' && !todayRecord?.checkIn;
   const canPunchAfternoon = todayLeavePeriod !== 'afternoon' && todayLeavePeriod !== 'full' && !todayRecord?.checkOut;
   
-  // 判断某个时间段是否可以请假（已打卡则不能请假）
   const canLeaveMorning = !todayRecord?.checkIn && todayLeavePeriod !== 'morning' && todayLeavePeriod !== 'full';
   const canLeaveAfternoon = !todayRecord?.checkOut && todayLeavePeriod !== 'afternoon' && todayLeavePeriod !== 'full';
   
@@ -386,7 +424,6 @@ export const Home = () => {
         </div>
       </div>
 
-      {/* 请假模态框 */}
       {showLeaveModal && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl p-6 w-full max-w-sm">
